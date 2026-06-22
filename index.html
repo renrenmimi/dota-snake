@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>圣坛之蛇 · Dota Snake</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Marcellus&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="game">
+    <button id="muteBtn" class="mute gp" title="声音开关">🔊</button>
+
+    <header class="hud gp">
+      <div class="emblem radiant"></div>
+      <div class="hud-title">DOTA · 圣坛之蛇</div>
+      <div class="emblem dire"></div>
+    </header>
+
+    <div class="stats">
+      <div class="stat gp"><span class="stat-label">GOLD</span><span id="score" class="stat-num">0</span></div>
+      <div class="stat gp"><span class="stat-label">BEST</span><span id="best" class="stat-num">0</span></div>
+      <div class="stat gp"><span class="stat-label">LENGTH</span><span id="length" class="stat-num">3</span></div>
+      <div class="stat gp"><span class="stat-label">TIME</span><span id="clock" class="stat-num">0:00</span></div>
+    </div>
+
+    <div class="board">
+      <div class="arena">
+        <canvas id="game"></canvas>
+        <div id="overlay" class="overlay">
+          <div class="overlay-card">
+            <h2 id="overlayTitle">圣坛之蛇</h2>
+            <p id="overlaySub">选择段位，开始征程</p>
+            <div id="difficulty" class="ranks">
+              <button class="rank gp" data-diff="herald"><span class="medal herald">★</span><span class="rk">先锋 Herald</span></button>
+              <button class="rank gp" data-diff="crusader"><span class="medal crusader">★</span><span class="rk">卫士 Crusader</span></button>
+              <button class="rank gp" data-diff="legend"><span class="medal legend">★</span><span class="rk">传奇 Legend</span></button>
+              <button class="rank gp" data-diff="immortal"><span class="medal immortal">★</span><span class="rk">万古 Immortal</span></button>
+            </div>
+            <button id="resumeBtn" class="btn-primary hidden">继续征战</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dpad">
+      <button class="pad gp up" data-dir="up" aria-label="上">▲</button>
+      <button class="pad gp left" data-dir="left" aria-label="左">◀</button>
+      <div class="pad core gp"><span></span></div>
+      <button class="pad gp right" data-dir="right" aria-label="右">▶</button>
+      <button class="pad gp down" data-dir="down" aria-label="下">▼</button>
+    </div>
+
+    <div class="controls">
+      <button id="pauseBtn" class="btn gp">暂停</button>
+      <button id="newGameBtn" class="btn gp">重选段位</button>
+    </div>
+
+    <div class="voicebar">
+      <span class="voice-label">🔊 播报语音</span>
+      <select id="voiceSelect" class="voice-select" title="选择播报语音（切换可试听）"></select>
+    </div>
+
+    <p class="hint">方向键 / WASD / 控制盘 操控 · 空格暂停 · 连续吞噬触发连杀播报</p>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
