@@ -4,6 +4,8 @@
 
 Snake, re-skinned as a Dota 2 killing spree. Eat, grow, and let the announcer lose his mind.
 
+![Killstreak announcements over a Dota-flavoured snake](docs/screenshot.jpg)
+
 ## Features
 
 - **Killstreak announcements** — First Blood, Rampage, Holy Shit and friends fire as your streak climbs
