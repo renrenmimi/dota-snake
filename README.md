@@ -1,4 +1,4 @@
-# Dota Snake 🐍
+# Dota Snake
 
 **▶ [Play now](https://renrenmimi.github.io/dota-snake/)** — runs in your browser, nothing to install.
 
