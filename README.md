@@ -14,4 +14,4 @@ Snake, re-skinned as a Dota 2 killing spree. Eat, grow, and let the announcer lo
 
 ## Tech
 
-Plain HTML, CSS and JavaScript (`index.html` + `game.js` + `style.css`). No build step, no dependencies.
+Plain HTML, CSS and JavaScript — `index.html`, `game.js`, `style.css`.
