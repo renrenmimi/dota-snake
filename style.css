@@ -35,8 +35,12 @@ body {
 .game { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 12px; position: relative; }
 
 /* ===== 金色棱角面板（可靠的双层描边，不依赖 mask） ===== */
-.gp { position: relative; background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 45%, #4a3a18 60%, var(--gold-1)); clip-path: var(--oct); }
-.gp::before { content: ""; position: absolute; inset: 1.6px; background: linear-gradient(160deg, var(--d1), var(--d2)); clip-path: var(--oct); }
+/* isolate: ::before paints the dark inner face over everything in normal flow,
+   including bare text nodes like the arrows on .pad. Giving .gp its own stacking
+   context lets that layer sit at z-index -1 — above the gold border it draws as its
+   own background, below the panel content — instead of on top of the text. */
+.gp { position: relative; isolation: isolate; background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 45%, #4a3a18 60%, var(--gold-1)); clip-path: var(--oct); }
+.gp::before { content: ""; position: absolute; inset: 1.6px; z-index: -1; background: linear-gradient(160deg, var(--d1), var(--d2)); clip-path: var(--oct); }
 
 /* ===== 静音 ===== */
 .mute { position: absolute; top: -6px; right: -6px; z-index: 8; width: 40px; height: 40px; --c: 8px; cursor: pointer; border: none; color: var(--gold-1); font-size: 16px; }
