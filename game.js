@@ -17,6 +17,12 @@ const difficultyGroup = document.getElementById('difficulty');
 const resumeBtn = document.getElementById('resumeBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const newGameBtn = document.getElementById('newGameBtn');
+const bestLabelEl = document.getElementById('bestLabel');
+const dailyBtn = document.getElementById('dailyBtn');
+const dailyDateEl = document.getElementById('dailyDate');
+const dailyBestEl = document.getElementById('dailyBest');
+const wipeBtn = document.getElementById('wipeBtn');
+const storeNoteEl = document.getElementById('storeNote');
 
 // ---------- 常量 ----------
 const GRID = 20;
@@ -30,13 +36,64 @@ canvas.width = LOGICAL * dpr;
 canvas.height = LOGICAL * dpr;
 ctx.scale(dpr, dpr);
 
+// ============================================================
+//  本地存档：全站唯一的 localStorage 出入口
+//  隐私模式 / 配额写满 / 被手工改坏的值，一律降级为「没有记录」，
+//  绝不把异常抛回游戏主循环。
+// ============================================================
+const Store = (() => {
+  let healthy = true;
+  // 某些环境下光是读 window.localStorage 就会抛 SecurityError
+  function shelf() {
+    try { return window.localStorage || null; } catch (e) { healthy = false; return null; }
+  }
+  return {
+    ok() { return healthy && !!shelf(); },
+    get(key, fallback = null) {
+      const ls = shelf(); if (!ls) return fallback;
+      try { const v = ls.getItem(key); return v === null ? fallback : v; }
+      catch (e) { healthy = false; return fallback; }
+    },
+    set(key, value) {
+      const ls = shelf(); if (!ls) return false;
+      try { ls.setItem(key, String(value)); return true; }
+      catch (e) { healthy = false; return false; } // 配额写满：本局照常，只是留不下来
+    },
+    remove(key) {
+      const ls = shelf(); if (!ls) return false;
+      try { ls.removeItem(key); return true; } catch (e) { healthy = false; return false; }
+    },
+    getJSON(key, fallback) {
+      const raw = this.get(key, null);
+      if (raw === null) return fallback;
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : fallback;
+      } catch (e) { return fallback; } // 手工改坏了就当没有
+    },
+    setJSON(key, value) {
+      try { return this.set(key, JSON.stringify(value)); } catch (e) { return false; }
+    },
+  };
+})();
+
+const SK = {
+  difficulty: 'snakeDifficulty',
+  muted: 'snakeMuted',
+  voice: 'snakeVoice',
+  scores: 'snakeHighScores',   // { herald: n, crusader: n, legend: n, immortal: n }
+  legacyScore: 'snakeHighScore', // 旧版单一记录，首次启动时并入 scores 后删除
+  daily: 'snakeDailyBest',     // { date: 'YYYY-MM-DD', score: n, length: n }
+};
+
 const DIFFICULTY = {
   herald:   { step: 175, min: 115, accel: 1.3, label: '先锋' },
   crusader: { step: 130, min: 80,  accel: 2.2, label: '卫士' },
   legend:   { step: 95,  min: 55,  accel: 2.8, label: '传奇' },
   immortal: { step: 65,  min: 38,  accel: 3.4, label: '万古' },
 };
-let difficultyKey = localStorage.getItem('snakeDifficulty') || 'crusader';
+const DAILY_TIER = 'crusader'; // 每日挑战锁定同一节奏，大家才有得比
+let difficultyKey = Store.get(SK.difficulty, 'crusader');
 if (!DIFFICULTY[difficultyKey]) difficultyKey = 'crusader';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -44,11 +101,124 @@ const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Ma
 const fmtClock = (ms) => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
 // ============================================================
+//  每日挑战：把日期压成种子，同一天全世界吃到同一串圣物
+// ============================================================
+const Daily = (() => {
+  const pad = (n) => String(n).padStart(2, '0');
+  // 本地日历日，按玩家自己的时区算
+  function dateKey(d) {
+    const t = d instanceof Date && !isNaN(d) ? d : new Date();
+    return t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate());
+  }
+  // FNV-1a：把 'YYYY-MM-DD' 压成一个 32 位种子
+  function seedFor(key) {
+    let h = 2166136261 >>> 0;
+    const s = String(key);
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return h >>> 0;
+  }
+  // mulberry32：32 位状态的确定性 PRNG，够用且不必引入依赖
+  function mulberry32(a) {
+    let s = a >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  // 当天第 n 个圣物落在哪一格，与玩家怎么走无关
+  function sequence(key, count) {
+    const rnd = mulberry32(seedFor(key));
+    const n = Math.max(1, count || GRID * GRID);
+    const out = [];
+    for (let i = 0; i < n; i++) out.push({ x: Math.floor(rnd() * GRID), y: Math.floor(rnd() * GRID) });
+    return out;
+  }
+  return { dateKey, seedFor, mulberry32, sequence };
+})();
+
+// 让别人能核对「今天我们跑的是同一局」
+window.DailyChallenge = {
+  dateKey: Daily.dateKey,
+  seedFor: Daily.seedFor,
+  sequence: Daily.sequence,
+  today: () => Daily.dateKey(),
+  activeRun: () => ({
+    active: dailyMode,
+    date: dailyRunKey,
+    eaten: foodIndex,
+    food: food ? { x: food.x, y: food.y } : null,
+  }),
+};
+
+// ============================================================
+//  记录：每个段位各记一条，每日挑战单独再记一条
+// ============================================================
+const Records = (() => {
+  const sane = (n) => { const v = Number(n); return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0; };
+  let tiers = {};
+  let daily = { date: '', score: 0, length: 0 };
+
+  function load() {
+    const raw = Store.getJSON(SK.scores, null);
+    tiers = {};
+    for (const k in DIFFICULTY) tiers[k] = sane(raw && raw[k]);
+
+    // 迁移：旧版只有一条总记录，并进当前段位，别让老玩家白打
+    const legacy = sane(Store.get(SK.legacyScore, 0));
+    if (legacy > 0) {
+      if (legacy > tiers[difficultyKey]) tiers[difficultyKey] = legacy;
+      Store.setJSON(SK.scores, tiers);
+      Store.remove(SK.legacyScore);
+    }
+
+    const d = Store.getJSON(SK.daily, null);
+    const today = Daily.dateKey();
+    daily = (d && d.date === today)
+      ? { date: today, score: sane(d.score), length: sane(d.length) }
+      : { date: today, score: 0, length: 0 };   // 换了一天就从头再来
+  }
+
+  return {
+    load,
+    tier(key) { return sane(tiers[key]); },
+    allTiers() { return Object.assign({}, tiers); },
+    dailyBest() { return Object.assign({}, daily); },
+    dailyDate() { return daily.date; },
+    best(key, isDaily) { return isDaily ? sane(daily.score) : this.tier(key); },
+    // 回传是否刷新了记录，好让结算界面当场喊出来
+    submit(key, isDaily, score, length) {
+      const s = sane(score);
+      if (isDaily) {
+        const today = Daily.dateKey();
+        if (daily.date !== today) daily = { date: today, score: 0, length: 0 };
+        if (s <= daily.score) return false;
+        daily = { date: today, score: s, length: sane(length) };
+        Store.setJSON(SK.daily, daily);
+        return true;
+      }
+      if (!(key in tiers) || s <= tiers[key]) return false;
+      tiers[key] = s;
+      Store.setJSON(SK.scores, tiers);
+      return true;
+    },
+    wipe() {
+      for (const k in DIFFICULTY) tiers[k] = 0;
+      daily = { date: Daily.dateKey(), score: 0, length: 0 };
+      Store.remove(SK.scores);
+      Store.remove(SK.daily);
+      Store.remove(SK.legacyScore);
+    },
+  };
+})();
+
+// ============================================================
 //  音效（Web Audio 合成）
 // ============================================================
 const Sfx = (() => {
   let actx = null, master = null, ambient = null;
-  let enabled = localStorage.getItem('snakeMuted') !== '1';
+  let enabled = Store.get(SK.muted, '0') !== '1';
   function ensure() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -76,7 +246,7 @@ const Sfx = (() => {
   }
   return {
     ensure, isEnabled: () => enabled,
-    toggle() { enabled = !enabled; localStorage.setItem('snakeMuted', enabled ? '0' : '1'); if (!enabled) this.stopAmbient(); else ensure(); return enabled; },
+    toggle() { enabled = !enabled; Store.set(SK.muted, enabled ? '0' : '1'); if (!enabled) this.stopAmbient(); else ensure(); return enabled; },
     eat(c) { ensure(); const b = 720 + Math.min(c, 14) * 32; blip(b, 0.07, 'triangle', 0.18, 0); blip(b * 1.5, 0.1, 'triangle', 0.13, 0.05); },
     hit(level) { ensure(); const n = [392, 523, 659, 784, 988, 1175]; const k = Math.min(level + 1, n.length); for (let i = 0; i < k; i++) blip(n[i], 0.14, 'sawtooth', 0.12, i * 0.05); },
     start() { ensure(); blip(330, 0.16, 'sawtooth', 0.13, 0, 660); blip(660, 0.22, 'triangle', 0.1, 0.05); },
@@ -107,7 +277,7 @@ const Sfx = (() => {
 // ============================================================
 const Announcer = (() => {
   let voice = null, enabled = true;
-  let preferred = localStorage.getItem('snakeVoice') || '';
+  let preferred = Store.get(SK.voice, '') || '';
   // 优先挑选「自然/增强」女声
   const FEMALE = /(samantha|ava|allison|susan|zoe|karen|moira|tessa|fiona|serena|kate|stephanie|veena|nicky|joelle|sandy|paulina|isha|female|woman|girl|zira|aria|jenny|libby|sonia)/i;
   const NICE = /(enhanced|premium|neural|siri|natural|online)/i;
@@ -127,7 +297,7 @@ const Announcer = (() => {
     refresh: pick,
     listVoices() { return ('speechSynthesis' in window) ? speechSynthesis.getVoices() : []; },
     getVoice() { return voice; },
-    setVoiceByName(name) { preferred = name; localStorage.setItem('snakeVoice', name); const v = this.listVoices().find((x) => x.name === name); if (v) voice = v; },
+    setVoiceByName(name) { preferred = name; Store.set(SK.voice, name); const v = this.listVoices().find((x) => x.name === name); if (v) voice = v; },
     setEnabled(b) { enabled = b; if (!b && 'speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch (e) {} } },
     say(text, onend) {
       if (!enabled || !('speechSynthesis' in window)) { if (onend) onend(); return; }
@@ -238,7 +408,13 @@ let acc, lastTime, state, elapsed;
 let multi, streak, lastEatTime, exploded;
 let particles = [], popups = [], shockwaves = [], banners = [];
 let foodPulse = 0, ringAngle = 0, shakeT = 0, shakeT0 = 1, shakeAmp = 0, flash = 0;
-let highScore = Number(localStorage.getItem('snakeHighScore') || 0);
+let dailyMode = false;          // 本局是否在跑每日挑战
+let dailyRunKey = '';           // 本局用的日期，用于结算比对
+let dailyFood = [];             // 当天固定的圣物序列
+let foodIndex = 0;
+// 当前生效的段位：每日挑战锁定 DAILY_TIER，其余跟随玩家选择
+const activeTier = () => (dailyMode ? DAILY_TIER : difficultyKey);
+const currentBest = () => Records.best(activeTier(), dailyMode);
 
 // ============================================================
 //  生命周期
@@ -249,23 +425,55 @@ function resetBoard() {
   direction = { x: 1, y: 0 };
   nextDirection = { x: 1, y: 0 };
   score = 0; multi = 0; streak = 0; lastEatTime = -1e9; elapsed = 0; exploded = false;
-  const d = DIFFICULTY[difficultyKey];
+  const d = DIFFICULTY[activeTier()];
   stepInterval = d.step; minInterval = d.min; baseAccel = d.accel;
   acc = 0; particles = []; popups = []; shockwaves = []; banners = []; shakeT = 0; flash = 0;
   stopAnnouncements();
-  scoreEl.textContent = '0'; lengthEl.textContent = snake.length; bestEl.textContent = highScore; clockEl.textContent = '0:00';
+  if (dailyMode) {
+    dailyRunKey = Daily.dateKey();
+    dailyFood = Daily.sequence(dailyRunKey, GRID * GRID);
+    foodIndex = 0;
+  } else {
+    dailyRunKey = ''; dailyFood = []; foodIndex = 0;
+  }
+  scoreEl.textContent = '0'; lengthEl.textContent = snake.length; clockEl.textContent = '0:00';
+  paintBest();
   placeFood();
   state = 'ready';
-  overlayTitle.textContent = '圣坛之蛇';
-  overlaySub.textContent = '选择段位，开始征程';
+  overlayTitle.textContent = dailyMode ? '每日挑战' : '圣坛之蛇';
+  overlaySub.textContent = dailyMode
+    ? `${dailyRunKey} · 全世界同一串圣物`
+    : '选择段位，开始征程';
   difficultyGroup.classList.remove('hidden');
+  dailyBtn.classList.remove('hidden');
   resumeBtn.classList.add('hidden');
   pauseBtn.textContent = '暂停';
   highlightDifficulty();
   showOverlay();
 }
 function highlightDifficulty() {
-  difficultyGroup.querySelectorAll('.rank').forEach((b) => b.classList.toggle('active', b.dataset.diff === difficultyKey));
+  difficultyGroup.querySelectorAll('.rank').forEach((b) => b.classList.toggle('active', !dailyMode && b.dataset.diff === difficultyKey));
+  dailyBtn.classList.toggle('active', dailyMode);
+}
+// HUD 的 BEST 只显示当前语境的记录：本段位，或今天的每日挑战
+function paintBest() {
+  bestEl.textContent = currentBest();
+  bestLabelEl.textContent = dailyMode ? 'BEST · 每日' : 'BEST · ' + DIFFICULTY[activeTier()].label;
+}
+// 开局面板：每个段位各自的最佳，以及今天的日期与今日最佳
+function paintRecordBoard() {
+  dailyDateEl.textContent = Daily.dateKey();
+  const d = Records.dailyBest();
+  dailyBestEl.textContent = d.score > 0 ? `今日最佳 ${d.score}` : '今日最佳 —';
+  dailyBestEl.classList.toggle('none', d.score === 0);
+  difficultyGroup.querySelectorAll('.rank').forEach((b) => {
+    const el = b.querySelector('.rk-best');
+    if (!el) return;
+    const v = Records.tier(b.dataset.diff);
+    el.textContent = v > 0 ? `最佳 ${v}` : '暂无记录';
+    el.classList.toggle('none', v === 0);
+  });
+  storeNoteEl.classList.toggle('hidden', Store.ok());
 }
 function beginRun() {
   state = 'running'; lastTime = performance.now(); acc = 0; pauseBtn.textContent = '暂停';
@@ -275,7 +483,8 @@ function togglePause() {
   if (state === 'running') {
     state = 'paused';
     overlayTitle.textContent = '已暂停'; overlaySub.textContent = '按空格键或“继续征战”恢复';
-    difficultyGroup.classList.add('hidden'); resumeBtn.classList.remove('hidden'); pauseBtn.textContent = '继续';
+    difficultyGroup.classList.add('hidden'); dailyBtn.classList.add('hidden');
+    resumeBtn.classList.remove('hidden'); pauseBtn.textContent = '继续';
     Sfx.stopAmbient(); stopAnnouncements(); showOverlay();
   } else if (state === 'paused') {
     state = 'running'; lastTime = performance.now(); acc = 0; pauseBtn.textContent = '暂停'; hideOverlay(); Sfx.startAmbient();
@@ -284,25 +493,51 @@ function togglePause() {
 function endGame() {
   state = 'over'; exploded = true;
   stopAnnouncements();
-  const record = score > highScore;
-  if (record) { highScore = score; localStorage.setItem('snakeHighScore', highScore); bestEl.textContent = highScore; }
+  const tier = activeTier();
+  const record = Records.submit(tier, dailyMode, score, snake.length);
+  const where = dailyMode ? `每日 ${dailyRunKey}` : DIFFICULTY[tier].label;
+  paintBest(); paintRecordBoard();
   const pts = snake.map((_, i) => segCenter(i, 1));
   spawnExplosion(pts);
   shockwave(pts[0].x, pts[0].y, CELL * 5.5, 'rgba(255,90,90,0.85)', 0.7);
   triggerShake(12, 560); flash = 1.15;
   Sfx.death(); Sfx.stopAmbient();
-  banner(record ? 'VICTORY' : 'DEFEAT', record ? '新纪录' : '败北', record ? 'gold' : 'dire', 2.2, 46);
+  banner(record ? 'VICTORY' : 'DEFEAT', record ? `${where} 新纪录` : '败北', record ? 'gold' : 'dire', 2.2, 46);
   overlayTitle.textContent = record ? '🏆 新纪录' : '⚔ 败北';
-  overlaySub.textContent = `黄金 ${score} · 长度 ${snake.length} · 用时 ${fmtClock(elapsed)}`;
-  difficultyGroup.classList.remove('hidden'); resumeBtn.classList.add('hidden'); pauseBtn.textContent = '重新开始';
+  const line = `黄金 ${score} · 长度 ${snake.length} · 用时 ${fmtClock(elapsed)}`;
+  overlaySub.textContent = record
+    ? `${line} — ${where} 最佳${Store.ok() ? '' : '（本机无法保存）'}`
+    : `${line} · ${where} 最佳 ${currentBest()}`;
+  difficultyGroup.classList.remove('hidden'); dailyBtn.classList.remove('hidden');
+  resumeBtn.classList.add('hidden'); pauseBtn.textContent = '重新开始';
   highlightDifficulty();
   setTimeout(() => { if (state === 'over') showOverlay(); }, 900);
 }
+function occupied(p) { return snake.some((s) => s.x === p.x && s.y === p.y); }
+// 每日挑战的圣物按当天固定序列出现；序列格子被蛇身占住时，
+// 从该格起按棋盘顺序往后找第一个空格——同样是确定性的。
+function nextFreeFrom(base) {
+  const total = GRID * GRID;
+  const start = base.y * GRID + base.x;
+  for (let i = 0; i < total; i++) {
+    const c = (start + i) % total;
+    const p = { x: c % GRID, y: Math.floor(c / GRID) };
+    if (!occupied(p)) return p;
+  }
+  return { x: base.x, y: base.y };
+}
 function placeFood() {
-  let pos;
-  do { pos = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) }; }
-  while (snake.some((s) => s.x === pos.x && s.y === pos.y));
-  food = pos; foodPulse = 0;
+  if (dailyMode && dailyFood.length) {
+    const base = dailyFood[foodIndex % dailyFood.length];
+    foodIndex++;
+    food = nextFreeFrom(base);
+  } else {
+    let pos;
+    do { pos = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) }; }
+    while (occupied(pos));
+    food = pos;
+  }
+  foodPulse = 0;
 }
 
 function update() {
@@ -546,13 +781,43 @@ document.querySelectorAll('.pad[data-dir]').forEach((btn) => {
 difficultyGroup.addEventListener('click', (e) => {
   const btn = e.target.closest('.rank'); if (!btn) return;
   Sfx.ensure(); Sfx.click();
-  difficultyKey = btn.dataset.diff; localStorage.setItem('snakeDifficulty', difficultyKey);
+  dailyMode = false;
+  difficultyKey = btn.dataset.diff; Store.set(SK.difficulty, difficultyKey);
   resetBoard(); beginRun();
+});
+
+dailyBtn.addEventListener('click', () => {
+  Sfx.ensure(); Sfx.click();
+  dailyMode = true;
+  resetBoard(); beginRun();
+});
+
+// 清记录：先武装再确认，别让手滑抹掉一整周的成绩
+let wipeArmed = 0, wipeTimer = null;
+function disarmWipe() {
+  wipeArmed = 0; wipeBtn.textContent = '清空本地记录'; wipeBtn.classList.remove('armed');
+}
+wipeBtn.addEventListener('click', () => {
+  Sfx.ensure(); Sfx.click();
+  if (wipeTimer) clearTimeout(wipeTimer);
+  if (wipeArmed && Date.now() - wipeArmed < 5000) {
+    Records.wipe();
+    wipeArmed = 0;
+    wipeBtn.classList.remove('armed');
+    wipeBtn.textContent = '记录已清空';
+    paintBest(); paintRecordBoard();
+    wipeTimer = setTimeout(disarmWipe, 2000);
+    return;
+  }
+  wipeArmed = Date.now();
+  wipeBtn.textContent = '再点一次确认清空';
+  wipeBtn.classList.add('armed');
+  wipeTimer = setTimeout(disarmWipe, 5000);
 });
 
 pauseBtn.addEventListener('click', () => { Sfx.ensure(); if (state === 'running' || state === 'paused') togglePause(); else if (state === 'over') { resetBoard(); beginRun(); } else if (state === 'ready') beginRun(); });
 resumeBtn.addEventListener('click', () => { if (state === 'paused') togglePause(); });
-newGameBtn.addEventListener('click', () => { Sfx.ensure(); Sfx.click(); resetBoard(); });
+newGameBtn.addEventListener('click', () => { Sfx.ensure(); Sfx.click(); dailyMode = false; resetBoard(); });
 muteBtn.addEventListener('click', () => { const on = Sfx.toggle(); Announcer.setEnabled(on); muteBtn.textContent = on ? '🔊' : '🔇'; if (!on) stopAnnouncements(); else if (state === 'running') Sfx.startAmbient(); });
 
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'running') togglePause(); });
@@ -610,6 +875,8 @@ Announcer.refresh();
 populateVoices();
 setTimeout(populateVoices, 400); // 部分浏览器语音异步加载
 muteBtn.textContent = Sfx.isEnabled() ? '🔊' : '🔇';
+Records.load();
+paintRecordBoard();
 resetBoard();
 lastTime = performance.now();
 requestAnimationFrame(loop);

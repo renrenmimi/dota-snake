@@ -22,7 +22,7 @@
 
     <div class="stats">
       <div class="stat gp"><span class="stat-label">GOLD</span><span id="score" class="stat-num">0</span></div>
-      <div class="stat gp"><span class="stat-label">BEST</span><span id="best" class="stat-num">0</span></div>
+      <div class="stat gp"><span class="stat-label" id="bestLabel">BEST</span><span id="best" class="stat-num">0</span></div>
       <div class="stat gp"><span class="stat-label">LENGTH</span><span id="length" class="stat-num">3</span></div>
       <div class="stat gp"><span class="stat-label">TIME</span><span id="clock" class="stat-num">0:00</span></div>
     </div>
@@ -35,12 +35,23 @@
             <h2 id="overlayTitle">圣坛之蛇</h2>
             <p id="overlaySub">选择段位，开始征程</p>
             <div id="difficulty" class="ranks">
-              <button class="rank gp" data-diff="herald"><span class="medal herald">★</span><span class="rk">先锋 Herald</span></button>
-              <button class="rank gp" data-diff="crusader"><span class="medal crusader">★</span><span class="rk">卫士 Crusader</span></button>
-              <button class="rank gp" data-diff="legend"><span class="medal legend">★</span><span class="rk">传奇 Legend</span></button>
-              <button class="rank gp" data-diff="immortal"><span class="medal immortal">★</span><span class="rk">万古 Immortal</span></button>
+              <button class="rank gp" data-diff="herald"><span class="medal herald">★</span><span class="rk-body"><span class="rk">先锋 Herald</span><span class="rk-best none">暂无记录</span></span></button>
+              <button class="rank gp" data-diff="crusader"><span class="medal crusader">★</span><span class="rk-body"><span class="rk">卫士 Crusader</span><span class="rk-best none">暂无记录</span></span></button>
+              <button class="rank gp" data-diff="legend"><span class="medal legend">★</span><span class="rk-body"><span class="rk">传奇 Legend</span><span class="rk-best none">暂无记录</span></span></button>
+              <button class="rank gp" data-diff="immortal"><span class="medal immortal">★</span><span class="rk-body"><span class="rk">万古 Immortal</span><span class="rk-best none">暂无记录</span></span></button>
             </div>
+            <button id="dailyBtn" class="daily gp">
+              <span class="medal daily">☀</span>
+              <span class="rk-body">
+                <span class="rk">每日挑战 · <span id="dailyDate">-------</span></span>
+                <span class="rk-best none" id="dailyBest">今日最佳 —</span>
+              </span>
+            </button>
             <button id="resumeBtn" class="btn-primary hidden">继续征战</button>
+            <div class="archive-foot">
+              <button id="wipeBtn" class="wipe">清空本地记录</button>
+              <p id="storeNote" class="store-note hidden">本机无法保存记录，本局成绩不会留下</p>
+            </div>
           </div>
         </div>
       </div>
