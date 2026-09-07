@@ -332,7 +332,19 @@ const CLIPS = {
   holyshit:     ['Holy Shit', '鬼神杀戮'],
 };
 const clipAudio = {}, clipReady = {};
+
+// This repository ships no audio/ directory, and never has. The announcements
+// are spoken by speechSynthesis, which is the path every visitor actually gets
+// and which playAnnouncement() below already falls back to. initClips used to
+// build all thirteen Audio objects with preload="auto" regardless, so every
+// single load fired thirteen requests that 404'd and printed thirteen console
+// errors before the fallback quietly took over. The mechanism is kept rather
+// than deleted: drop audio/<key>.mp3 in for every key in CLIPS and flip this
+// to true.
+const HAS_CLIP_AUDIO = false;
+
 function initClips() {
+  if (!HAS_CLIP_AUDIO) return;
   for (const k in CLIPS) {
     try {
       const a = new Audio('audio/' + k + '.mp3'); a.preload = 'auto'; a.volume = 0.95;
